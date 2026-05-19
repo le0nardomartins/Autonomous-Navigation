@@ -20,6 +20,9 @@ class ControlPanel:
         self._build_ui()
         self._register_callbacks()
 
+    def _IsRunning(self):
+        return self.running
+
     def _iniciar(self):
         self.running = True
         print("[LOG] Iniciando movimento")

@@ -34,7 +34,7 @@ def pidHub(erro, pid_straight, pid_curve, dt=0.2):
 
 def main_loop():
     cv2.namedWindow("Visao", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Visao", 960, 680)
+    cv2.resizeWindow("Visao", 960, 700)
 
     ser = serial.Serial(COM, 9600, timeout=1)
     time.sleep(2)
@@ -68,6 +68,8 @@ def main_loop():
         ki_curve = panel.get("CURVA", "Ki") / 1000.0
         kd_curve = panel.get("CURVA", "Kd") / 100.0
         pid_curve.setValues(kp_curve, ki_curve, kd_curve)
+        
+        run = panel._IsRunning()
 
         # ── Definição dos pontos de perspectiva ─────────────────────────────
         cx = width // 2
@@ -118,10 +120,11 @@ def main_loop():
             cv2.circle(limiar_bgr, (ROI_W // 2, round(ROI_H * 0.9)), 5, (0, 0, 255), -1)
 
         # ── Envio de dados para o Arduino ─────────────────────────────
-        now = time.time() * 1000
-        if now - last_send >= 200:
-            last_send = now
-            angle = pidHub(error, pid_straight, pid_curve, dt=0.2)
+        if run:
+            now = time.time() * 1000
+            if now - last_send >= 200:
+                last_send = now
+                angle = pidHub(error, pid_straight, pid_curve, dt=0.2)
 
             data = {
                 "DEVIATION": False,
@@ -138,10 +141,10 @@ def main_loop():
             msg = json.dumps(data) + '\n'
             ser.write(msg.encode('utf-8'))
 
-            if ser.in_waiting:
-                response = ser.readline().decode('utf-8', errors='ignore').strip()
-                if response:
-                    last_rx = response  # ← atualiza a última mensagem recebida
+        if ser.in_waiting:
+            response = ser.readline().decode('utf-8', errors='ignore').strip()
+            if response:
+                last_rx = response  # ← atualiza a última mensagem recebida
 
         # ── Dashboard ──────────────────────────────────────
         img_view  = cv2.resize(img, (960, 540))
@@ -174,6 +177,9 @@ def main_loop():
         # ── coluna 4 — RX Arduino ──
         cv2.putText(info, "RX ARDUINO",  (790, 25),  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
         cv2.putText(info, last_rx[:20], (790, 65),  cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 128),   2)
+        cv2.putText(info, "STATUS ", (790, 105), cv2.FONT_HERSHEY_SIMPLEX,  0.6, (180, 180, 180), 1)
+        cv2.putText(info, "RUNNING" if run else "STOPPED", (790, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 128) if run else (0, 0, 255), 2)
+        
         dashboard = np.vstack((img_view, info))
         cv2.imshow("Visao", dashboard)
 
