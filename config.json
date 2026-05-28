@@ -11,5 +11,5 @@
     "CURVA_Kp": 300,
     "CURVA_Ki": 0,
     "CURVA_Kd": 0,
-    "PAR\u00c2METROS DO CARRO_Vel": 30
+    "PAR\u00c2METROS DO CARRO_PWM": 30
 }

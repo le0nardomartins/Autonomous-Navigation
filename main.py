@@ -1,29 +1,20 @@
+import time
 import threading
+import json
+
 import cv2
 import numpy as np
 import serial
-import json
+
 from PID import PID
-import time
 from CtrlPanel import ControlPanel
-import threading
 from imageProcess import processLane
+from hud import drawDots, addInfo
 
 
 def getFrameDimensions(frame, prop):
     height, width = round(frame.shape[0] / prop), round(frame.shape[1] / prop)
     return height, width
-
-
-def nothing(x):
-    pass
-
-
-def drawDots(img, points, labels):
-    for i, p in enumerate(points):
-        x, y = int(p[0]), int(p[1])
-        cv2.circle(img, (x, y), 5, (0, 255, 255), -1)
-        cv2.putText(img, labels[i], (x + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
 
 
 def pidHub(erro, pid_straight, pid_curve, dt=0.2):
@@ -32,9 +23,9 @@ def pidHub(erro, pid_straight, pid_curve, dt=0.2):
     return pid_curve.update(erro, dt=dt)
 
 
-def main_loop():
-    cv2.namedWindow("Visao", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Visao", 960, 700)
+def mainLoop():
+    cv2.namedWindow("Visão", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Visão", 960, 700)
 
     ser = serial.Serial(COM, 9600, timeout=1)
     time.sleep(2)
@@ -43,7 +34,8 @@ def main_loop():
     angle = 0
     last_send = 0
     last_rx = "Stand by..."  # ← variável para armazenar a última mensagem recebida do Arduino
-
+    last_run = None
+    
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -57,7 +49,7 @@ def main_loop():
         y_top        = panel.get("ROI", "Altura sup")
         y_bot        = panel.get("ROI", "Altura inf")
         limiar_value = panel.get("IMAGEM", "Limiar")
-        vel          = panel.get("PARÂMETROS DO CARRO", "Vel")
+        pwm          = panel.get("PARÂMETROS DO CARRO", "PWM")
 
         kp_straight = panel.get("RETA", "Kp") / 100.0
         ki_straight = panel.get("RETA", "Ki") / 1000.0
@@ -104,7 +96,7 @@ def main_loop():
         _, limiar = cv2.threshold(gray, limiar_value, 255, cv2.THRESH_BINARY)
         limiar_bgr = cv2.cvtColor(limiar, cv2.COLOR_GRAY2BGR)
 
-        error, limiar_bgr = processLane(ROI_H, ROI_W, limiar, limiar_bgr)
+        error, limiar_bgr = processLane(ROI_H, ROI_W, limiar, limiar_bgr, last_error=error)
 
         # ── Envio de dados para o Arduino ─────────────────────────────
         if run:
@@ -113,37 +105,41 @@ def main_loop():
                 last_send = now
                 angle = pidHub(error, pid_straight, pid_curve, dt=0.2)
 
-            data = {
-                "DEVIATION": False,
-                "STOP":      False,
-                "SG":        False,
-                "SV":        False,
-                "SERVO":     int(angle + 90),
-                "M1":        vel,
-                "M2":        vel,
-                "M3":        vel,
-                "M4":        vel,
-            }
+                data = {
+                    "DEVIATION": False,
+                    "STOP":      False,
+                    "SG":        False,
+                    "SV":        False,
+                    "SERVO":     int(angle + 90),
+                    "PWM":       pwm,
+                }
+
+                msg = json.dumps(data) + '\n'
+                ser.write(msg.encode('utf-8'))
+                panel.log(f"TX → {msg.strip()}", "tx")
+
         else:
-            data = {
-                "DEVIATION": False,
-                "STOP":      False,
-                "SG":        False,
-                "SV":        False,
-                "SERVO":     90,
-                "M1":        0,
-                "M2":        0,
-                "M3":        0,
-                "M4":        0,
-            }
-        
-        msg = json.dumps(data) + '\n'
-        ser.write(msg.encode('utf-8'))
+            if last_run != False:  # só envia uma vez ao parar
+                data = {
+                    "DEVIATION": False,
+                    "STOP":      True,
+                    "SG":        False,
+                    "SV":        False,
+                    "SERVO":     int(angle + 90),
+                    "PWM":       0,
+                }
+                msg = json.dumps(data) + '\n'
+                ser.write(msg.encode('utf-8'))
+                panel.log(f"TX → {msg.strip()}", "tx")
+                panel.log("[CONTROLE MANUAL] veículo parado pelo painel de controle", "warn")
+
+        last_run = run
 
         if ser.in_waiting:
             response = ser.readline().decode('utf-8', errors='ignore').strip()
             if response:
                 last_rx = response  # ← atualiza a última mensagem recebida
+                panel.log(f"RX ← {response}", "rx")
 
         # ── Dashboard ──────────────────────────────────────
         img_view  = cv2.resize(img, (960, 540))
@@ -154,33 +150,10 @@ def main_loop():
         cv2.putText(img_view, "Bird Eye", (635, 205),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
-        info = np.zeros((140, 960, 3), dtype=np.uint8)
+        info = addInfo(error, angle, pwm, kp_straight, ki_straight, kd_straight, kp_curve, ki_curve, kd_curve, last_rx, run)
 
-        # ── coluna 1 — erro e servo ──
-        cv2.putText(info, f"Erro:  {error}",              (20, 40),  cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-        cv2.putText(info, f"Servo: {int(angle + 90)}",  (20, 80),  cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0),   2)
-        cv2.putText(info, f"Vel:   {vel}",               (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        # ── coluna 2 — PID reta ──
-        cv2.putText(info, "PID RETA", (340, 25),  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
-        cv2.putText(info, f"Kp: {kp_straight:.2f}", (340, 55),  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(info, f"Ki: {ki_straight:.3f}", (340, 85),  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(info, f"Kd: {kd_straight:.2f}", (340, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
-        # ── coluna 3 — PID curva ──
-        cv2.putText(info, "PID CURVA", (580, 25),  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-        cv2.putText(info, f"Kp: {kp_curve:.2f}", (580, 55),  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        cv2.putText(info, f"Ki: {ki_curve:.3f}", (580, 85),  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        cv2.putText(info, f"Kd: {kd_curve:.2f}", (580, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
-        # ── coluna 4 — RX Arduino ──
-        cv2.putText(info, "RX ARDUINO", (790, 25),  cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
-        cv2.putText(info, last_rx[:20], (790, 65),  cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 128),   2)
-        cv2.putText(info, "STATUS ", (790, 105), cv2.FONT_HERSHEY_SIMPLEX,  0.6, (180, 180, 180), 1)
-        cv2.putText(info, "RUNNING" if run else "STOPPED", (790, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 128) if run else (0, 0, 255), 2)
-        
         dashboard = np.vstack((img_view, info))
-        cv2.imshow("Visao", dashboard)
+        cv2.imshow("Visão", dashboard)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -189,14 +162,14 @@ def main_loop():
     ser.close()
     cv2.destroyAllWindows()
 
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 ret, frame = cap.read()
 
 if not ret:
-    print("Erro ao abrir câmera.")
+    print("[ERRO] Erro ao abrir câmera.")
     exit()
 
 height, width = getFrameDimensions(frame, 1)
@@ -206,10 +179,10 @@ pid_curve = PID(Kp=0, Ki=0, Kd=0, output_limit=90.0)
 
 ROI_W = 320
 ROI_H = 240
-COM = "COM20"
+COM = "COM5"
 
-panel = ControlPanel()
-t = threading.Thread(target=main_loop, daemon=True)
+panel = ControlPanel(width, height)
+t = threading.Thread(target=mainLoop, daemon=True)
 t.start()
 
 panel.run()

@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
 
-def processLane(roi_h, roi_w, limiar, limiar_bgr):
-    error = 0
+def processLane(roi_h, roi_w, limiar, limiar_bgr, last_error=0):
+    error = last_error
     mid_y         = roi_h // 2
     row           = limiar[mid_y]
     left_indices  = np.where(row[:roi_w // 2] == 255)[0]
