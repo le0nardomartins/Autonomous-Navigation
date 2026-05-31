@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-track_size = 0
+track_size = 200
 
 def laneDetectionPipeline(roi_h, roi_w, limiar, limiar_bgr, last_error=0):
     global track_size
@@ -15,14 +15,16 @@ def laneDetectionPipeline(roi_h, roi_w, limiar, limiar_bgr, last_error=0):
     minimum_limit = (roi_h // 2) * 0.1
     
     # Detecta as faixas na imagem limiarizada e retorna a posição da faixa esquerda, da faixa direita e se cada uma é válida ou não
-    left_lane, right_lane, left_valid, right_valid = detectLanes(limiar, roi_h // 2, roi_w, minimum_limit)
+    # left_lane, right_lane, left_valid, right_valid = detectLanes(limiar, roi_h // 2, roi_w, minimum_limit, True)
+    
+    # Realiza uma busca por janelas deslizantes para detectar as faixas na imagem limiarizada
+    left_lane, right_lane, left_valid, right_valid = slidingWindowSearch(limiar, roi_h // 2, roi_w, minimum_limit, num_windows=3)
     
     if track_size == 0:
         track_size = right_lane - left_lane
     
     # Processa a detecção das faixas e calcula o erro de acordo com os casos possíveis
-    error, limiar_bgr, lane_state, track_size, track_center =  processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size)
-    print(track_size)
+    error, limiar_bgr, lane_state, track_size, track_center =  processLanes(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size)
     
     # Desenha um círculo verde no centro da pista 
     if(track_center != 0):
@@ -34,9 +36,37 @@ def laneDetectionPipeline(roi_h, roi_w, limiar, limiar_bgr, last_error=0):
     return error, limiar_bgr, lane_state
 
 
-def detectLanes(limiar, height, width, limit):
+def slidingWindowSearch(limiar, height, width, limit, num_windows=1):
+    # Realiza uma busca por janelas deslizantes para detectar as faixas na imagem limiarizada, retornando a posição média das faixas detectadas e se cada uma é válida ou não
+    right_lanes_pos = []
+    left_lanes_pos = []
+    
+    # A altura de cada janela é definida como a altura da ROI dividida pelo número de janelas
+    window_height = height // num_windows
+    
+    # Para cada janela, conta o número de pixels brancos em cada coluna e detecta a posição da faixa esquerda e da faixa direita, verificando se cada uma é válida ou não
+    for window in range(num_windows):
+        start_y = height - (window + 1) * window_height
+        end_y = height - window * window_height
+        
+        left_lane, right_lane, left_valid, right_valid = detectLanes(limiar[start_y:end_y], window_height, width, limit)
+ 
+        if left_valid:
+            left_lanes_pos.append(left_lane)
+            
+        if right_valid:
+            right_lanes_pos.append(right_lane)
+
+    # Retorna a posição média das faixas detectadas e se elas são válidas ou não
+    return int(np.mean(left_lanes_pos)) if left_lanes_pos else 0, int(np.mean(right_lanes_pos)) if right_lanes_pos else width, bool(left_lanes_pos), bool(right_lanes_pos)
+
+
+def detectLanes(limiar, height, width, limit, slice_image=False):
     # Conta o número de pixels brancos em cada coluna da imagem limiarizada a partir da metade inferior da ROI
-    white_pixels_per_column = [cv2.countNonZero(limiar[height:, i]) for i in range(width)]
+    if slice_image:
+        white_pixels_per_column = [cv2.countNonZero(limiar[height:, i]) for i in range(width)]
+    else:
+        white_pixels_per_column = [cv2.countNonZero(limiar[:, i]) for i in range(width)]
 
     # Encontra a posição da faixa esquerda e da faixa direita com base no número de pixels brancos em cada coluna
     left_lane = white_pixels_per_column.index(max(white_pixels_per_column[:width // 2]))
@@ -53,7 +83,7 @@ def detectLanes(limiar, height, width, limit):
     return left_lane, right_lane, left_valid, right_valid
 
 
-def processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size=0):
+def processLanes(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size=0):
     track_center = 0
     
     # Caso 1 - Duas faixas detectadas
@@ -99,6 +129,8 @@ def processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference
 
     return error, limiar_bgr, lane_state, track_size, track_center
 
+
 def getFrameDimensions(frame, prop):
+    # Retorna as dimensões da imagem
     height, width = round(frame.shape[0] / prop), round(frame.shape[1] / prop)
     return height, width

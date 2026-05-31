@@ -91,7 +91,7 @@ def mainLoop():
         _, limiar = cv2.threshold(gray, limiar_value, 255, cv2.THRESH_BINARY)
         limiar_bgr = cv2.cvtColor(limiar, cv2.COLOR_GRAY2BGR)
 
-        error, limiar_bgr = laneDetectionPipeline(ROI_H, ROI_W, limiar, limiar_bgr, last_error=error)
+        error, limiar_bgr, lane_state = laneDetectionPipeline(ROI_H, ROI_W, limiar, limiar_bgr, last_error=error)
 
         # ── Envio de dados para o Arduino ─────────────────────────────
         if run:

@@ -18,8 +18,9 @@ def nothing(x):
 ROI_W = 320
 ROI_H = 240
 
-frame = cv2.imread("tests\images\pista02.png")
-#frame = cv2.imread("tests\images\curva_2.png")
+#frame = cv2.imread("tests/images/pista02.png")
+frame = cv2.imread("tests/images/curva_2_no_right_lane.png")
+#frame = cv2.imread("tests/images/curva_2.png")
 
 if frame is None:
     print("Imagem não encontrada")
