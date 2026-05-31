@@ -21,7 +21,8 @@ def laneDetectionPipeline(roi_h, roi_w, limiar, limiar_bgr, last_error=0):
         track_size = right_lane - left_lane
     
     # Processa a detecção das faixas e calcula o erro de acordo com os casos possíveis
-    error, limiar_bgr, lane_state =  processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size)
+    error, limiar_bgr, lane_state, track_size, track_center =  processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size)
+    print(track_size)
     
     # Desenha um círculo verde no centro da pista 
     if(track_center != 0):
@@ -53,6 +54,8 @@ def detectLanes(limiar, height, width, limit):
 
 
 def processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference_line_y, limiar_bgr, last_error, track_size=0):
+    track_center = 0
+    
     # Caso 1 - Duas faixas detectadas
     if left_valid and right_valid:
         # O centro da pista é a média entre as duas faixas detectadas
@@ -94,7 +97,7 @@ def processLane(left_lane, right_lane, left_valid, right_valid, roi_w, reference
         error = last_error
         lane_state = "none"
 
-    return error, limiar_bgr, lane_state
+    return error, limiar_bgr, lane_state, track_size, track_center
 
 def getFrameDimensions(frame, prop):
     height, width = round(frame.shape[0] / prop), round(frame.shape[1] / prop)
