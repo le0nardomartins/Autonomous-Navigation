@@ -10,6 +10,7 @@ from PID import PID
 from CtrlPanel import ControlPanel
 from imageProcess import laneDetectionPipeline, getFrameDimensions
 from hud import drawDots, addInfo
+from signDetector import SignDetector
 
 
 def pidHub(erro, pid_straight, pid_curve, dt=0.2):
@@ -28,8 +29,9 @@ def mainLoop():
     error = 0
     angle = 0
     last_send = 0
-    last_rx = "Stand by..."  # ← variável para armazenar a última mensagem recebida do Arduino
-    last_run = None
+    last_rx   = "Stand by..."
+    last_run  = None
+    prev_flags = (False, False, False)
     
     while True:
         ret, frame = cap.read()
@@ -37,6 +39,21 @@ def mainLoop():
             break
 
         img = frame.copy()
+
+        # ── Detecção de sinais de trânsito ────────────────────
+        sign_det.update(frame)
+        flag_stop, flag_sg, flag_sv = sign_det.get_flags()
+
+        # Log apenas quando o estado dos sinais muda
+        curr_flags = (flag_stop, flag_sg, flag_sv)
+        if curr_flags != prev_flags:
+            if flag_stop:
+                panel.log("[SINAL] Placa STOP — motores parados", "warn")
+            elif flag_sv:
+                panel.log("[SINAL] Semáforo VERMELHO — motores parados", "warn")
+            elif flag_sg:
+                panel.log("[SINAL] Semáforo VERDE — retomando", "ok")
+            prev_flags = curr_flags
 
         # ── Leitura dos controles ─────────────────────────────
         upper        = panel.get("ROI", "Linha superior")
@@ -100,13 +117,16 @@ def mainLoop():
                 last_send = now
                 angle = pidHub(error, pid_straight, pid_curve, dt=0.2)
 
+                # STOP ou semáforo vermelho → zera PWM
+                effective_pwm = 0 if (flag_stop or flag_sv) else pwm
+
                 data = {
                     "DEVIATION": False,
-                    "STOP":      False,
-                    "SG":        False,
-                    "SV":        False,
+                    "STOP":      flag_stop,
+                    "SG":        flag_sg,
+                    "SV":        flag_sv,
                     "SERVO":     int(angle + 90),
-                    "PWM":       pwm,
+                    "PWM":       effective_pwm,
                 }
 
                 msg = json.dumps(data) + '\n'
@@ -137,6 +157,8 @@ def mainLoop():
                 panel.log(f"RX ← {response}", "rx")
 
         # ── Dashboard ──────────────────────────────────────
+        sign_det.draw(img)
+
         img_view  = cv2.resize(img, (960, 540))
         bird_view = cv2.resize(limiar_bgr, (320, 180))
 
@@ -145,7 +167,9 @@ def mainLoop():
         cv2.putText(img_view, "Bird Eye", (635, 205),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
-        info = addInfo(error, angle, pwm, kp_straight, ki_straight, kd_straight, kp_curve, ki_curve, kd_curve, last_rx, run)
+        info = addInfo(error, angle, pwm, kp_straight, ki_straight, kd_straight,
+                       kp_curve, ki_curve, kd_curve, last_rx, run,
+                       flag_stop, flag_sg, flag_sv)
 
         dashboard = np.vstack((img_view, info))
         cv2.imshow("Visão", dashboard)
@@ -157,14 +181,43 @@ def mainLoop():
     ser.close()
     cv2.destroyAllWindows()
 
-cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+def _select_com() -> str:
+    from serial.tools import list_ports
+    ports = [p.device for p in list_ports.comports()]
+    if not ports:
+        com = input("[COM] Nenhuma porta detectada. Digite manualmente (ex: COM3): ").strip()
+        return com or "COM5"
+    if len(ports) == 1:
+        print(f"[COM] Porta detectada automaticamente: {ports[0]}")
+        return ports[0]
+    print("[COM] Portas disponíveis:")
+    for i, p in enumerate(ports):
+        print(f"  [{i}] {p}")
+    try:
+        idx = int(input(f"[COM] Escolha o número (0-{len(ports)-1}): ").strip())
+        return ports[idx]
+    except (ValueError, IndexError):
+        print(f"[COM] Entrada inválida, usando {ports[0]}")
+        return ports[0]
 
+
+def _open_camera() -> cv2.VideoCapture:
+    for idx in (1, 0):
+        c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        if c.isOpened() and c.read()[0]:
+            print(f"[CAM] Camera aberta no indice {idx}")
+            return c
+        c.release()
+    print("[ERRO] Nenhuma camera disponivel (indices 0 e 1 falharam).")
+    exit()
+
+cap = _open_camera()
 ret, frame = cap.read()
 
 if not ret:
-    print("[ERRO] Erro ao abrir câmera.")
+    print("[ERRO] Falha ao ler o primeiro frame.")
     exit()
 
 height, width = getFrameDimensions(frame, 1)
@@ -174,7 +227,9 @@ pid_curve = PID(Kp=0, Ki=0, Kd=0, output_limit=90.0)
 
 ROI_W = 320
 ROI_H = 240
-COM = "COM5"
+COM = _select_com()
+
+sign_det = SignDetector("model/traffic_sign_detector.pt")
 
 panel = ControlPanel(width, height)
 t = threading.Thread(target=mainLoop, daemon=True)
