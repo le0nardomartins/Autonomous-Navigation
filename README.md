@@ -1,6 +1,6 @@
 # AutoCar — SimplifyDetectors
 
-Sistema de visão computacional para veículos autônomos que combina **detecção de faixas** (OpenCV + PID), **detecção de sinais de trânsito** (YOLOv11) e **detecção de obstáculos/pedestres** (YOLOv11n COCO) com uma máquina de estados para tomada de decisão autônoma.
+Sistema de visão computacional para veículos autônomos com detecção de faixas, sinais de trânsito e controle PID — comunicação com Arduino via serial.
 
 ---
 
@@ -8,89 +8,101 @@ Sistema de visão computacional para veículos autônomos que combina **detecç�
 
 | Módulo | Descrição |
 |---|---|
-| Detector de faixas | Transformação bird-eye, threshold adaptável, erro lateral → PID dual |
-| Detector de sinais | YOLOv11 — 15 classes (semáforos, STOP, limites de velocidade) |
-| Detector de obstáculos | YOLOv11n COCO — pessoa, carro, caminhão, ônibus, bicicleta, moto |
-| Sensor de proximidade | Estimativa de distância por área de bounding box (sensor virtual) |
-| Máquina de estados | LIVRE → STOP → LIVRE / LIVRE → OBSTACULO → LIVRE |
-| Modo vídeo | Loop em tempo real com trackbars de ROI e PID |
-| Modo imagem | Visualização interativa com sliders e salvamento de configuração |
+| Detector de faixas | Bird-eye view, sliding window, erro lateral → PID dual reta/curva |
+| Detector de sinais | YOLOv11 — semáforo (verde/vermelho/amarelo) e placa STOP |
+| Tomada de decisão | Flags STOP/SG/SV controlam PWM enviado ao Arduino |
+| Painel de controle | Interface Tkinter com sliders de ROI, PID e log em tempo real |
+| Auto-detecção serial | Lista portas COM disponíveis e pede escolha no terminal |
+| Auto-detecção câmera | Tenta índice 1, fallback para 0 automaticamente |
+
+---
+
+## Estrutura
+
+```
+AutoCar-SimplifyDetectors/
+├── main.py            # Loop principal — câmera, serial, dashboard
+├── CtrlPanel.py       # Painel de controle Tkinter
+├── imageProcess.py    # Pipeline de detecção de faixas (sliding window)
+├── signDetector.py    # Detector de sinais YOLOv11
+├── hud.py             # Painel de informações do dashboard
+├── PID.py             # Controlador PID
+├── config.json        # Última configuração salva pelo painel
+└── model/
+    └── traffic_sign_detector.pt   # Baixar separadamente (ver abaixo)
+```
+
+---
+
+## Instalação
+
+```bash
+pip install opencv-python numpy pyserial ultralytics==8.3.5
+```
+
+### Modelo de sinais de trânsito
+
+Baixe `traffic_sign_detector.pt` em:
+[bhaskrr/traffic-sign-detection-using-yolov11](https://github.com/bhaskrr/traffic-sign-detection-using-yolov11)
+
+Coloque em `model/traffic_sign_detector.pt`.
+
+---
 
 ## Como usar
 
-### Alternar modo
-
-No topo de `detector_pista.py`:
-
-```python
-MODE       = "video"        # "video" | "image"
-IMAGE_NAME = "image_1.png"  # arquivo em images/  (só para modo image)
-```
-
-### Modo vídeo
-
 ```bash
-python detector_pista.py
+python main.py
 ```
 
-- Janela **Comandos** — ajuste de ROI, limiar, velocidade e PID via trackbars
-- Janela **Visao** — frame anotado com bird-eye, painel de telemetria e estado
-- Arraste `Salvar Pipeline` para 1 para exportar as 6 etapas de processamento
-- Tecla `Q` para sair
+Ao iniciar, o terminal pergunta qual porta COM usar:
 
-### Modo imagem
-
-```bash
-python detector_pista.py
+```
+[COM] Portas disponíveis:
+  [0] COM3
+  [1] COM5
+[COM] Escolha o número (0-1):
 ```
 
-- Janela **Controles** — sliders para ajustar a ROI em tempo real:
+Se só houver uma porta, ela é usada automaticamente. Se nenhuma for encontrada, o terminal pede para digitar manualmente.
 
-| Slider | Função |
-|---|---|
-| Linha superior | Largura da ROI no topo |
-| Linha inferior | Largura da ROI na base |
-| Altura sup | Posição Y do topo da ROI |
-| Altura inf | Posição Y da base da ROI |
-| Desl. X | Deslocamento horizontal do centro da ROI |
-| Limiar | Threshold de binarização |
-
-| Tecla | Ação |
-|---|---|
-| `S` | Salva configuração em `output/config.json` + exporta imagem |
-| `P` | Salva as 6 etapas do pipeline em `output/` |
-| `Q` / `ESC` | Sair |
-
-A configuração salva é carregada automaticamente na próxima execução.
+A câmera é aberta automaticamente — tenta índice 1 (câmera externa) e, se falhar, usa índice 0 (webcam integrada).
 
 ---
 
-## Máquina de estados
+## Painel de controle
 
-| Estado | Gatilho | Efeito |
-|---|---|---|
-| `LIVRE` | — | PID normal, velocidade completa |
-| `STOP` | Placa STOP ou semáforo vermelho/amarelo | Velocidade = 0, aguarda ~3 s |
-| `OBSTACULO` | Bbox de obstáculo > 4 % do frame | Velocidade ÷ 2, desvio lateral de 60 px |
+| Seção | Parâmetros |
+|---|---|
+| ROI | Linha superior, Linha inferior, Altura sup, Altura inf |
+| Imagem | Limiar de binarização, Erro de transição reta/curva |
+| Reta | Kp, Ki, Kd do PID em linha reta |
+| Curva | Kp, Ki, Kd do PID em curva |
+| Parâmetros do carro | PWM base dos motores |
+
+**Botões:** Iniciar · Parar · Resetar (restaura `config.json`) · Salvar
 
 ---
 
-## Dashboard
+## Protocolo serial (JSON → Arduino)
 
-O painel inferior exibe em tempo real:
+Enviado a cada 200 ms enquanto o painel estiver em **Iniciar**:
 
-- **Estado atual** (LIVRE / STOP / OBSTACULO) com cor indicativa
-- Erro lateral, ângulo do servo, velocidade efetiva
-- Ganhos PID (reta e curva)
-- Flags de sinais: STOP · SG · SV
-- Obstáculos detectados e barra de proximidade
+```json
+{ "DEVIATION": false, "STOP": false, "SG": true, "SV": false, "SERVO": 90, "PWM": 30 }
+```
+
+| Campo | Significado |
+|---|---|
+| `STOP` | Placa STOP detectada — PWM = 0 |
+| `SG` | Semáforo verde — PWM normal |
+| `SV` | Semáforo vermelho/amarelo — PWM = 0 |
+| `SERVO` | Ângulo do servo (90 = frente) |
+| `PWM` | Velocidade efetiva dos motores |
 
 ---
 
 ## Classes detectadas
 
-**Sinais** (`traffic_sign_detector.pt`):
+`traffic_sign_detector.pt`:
 Semáforo verde · vermelho · amarelo · Placa STOP · Velocidade 20/30/40/50/60/70/80/100/120 km/h
-
-**Obstáculos** (`yolo11n.pt` COCO):
-Pessoa · Bicicleta · Carro · Moto · Ônibus · Caminhão
