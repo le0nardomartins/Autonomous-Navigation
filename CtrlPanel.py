@@ -5,22 +5,27 @@ import os
 import time
 
 class ControlPanel:
-    def __init__(self, width, height):
+    def __init__(self, width, height, test_mode=False, dashboard_url="", twin_path=""):
         self.root = tk.Tk()
         self.root.title("Controles")
         self.root.configure(bg="#1e1e2e")
         self.root.geometry("900x750")
         self.root.resizable(True, True)
-        
+
         self.frame_width  = width
         self.frame_height = height
         self.running      = False
+        self._initial_test_mode = test_mode
+        self._dashboard_url = dashboard_url
+        self._twin_path     = twin_path
 
         self.vars       = {}
         self.val_labels = {}
         self.callbacks  = {}
         self._build_ui()
         self._register_callbacks()
+        if self._dashboard_url:
+            self.root.after(2000, self._poll_server)
 
     def _IsRunning(self):
         return self.running
@@ -51,6 +56,32 @@ class ControlPanel:
                 if key in self.val_labels:
                     self.val_labels[key].config(text=str(config[key]))
         self.log("[PAINEL] Valores restaurados do config.json", "info")
+
+    def get_connection(self):
+        """Retorna (com, cam_idx) se reconexão foi pedida, senão None. com=None = modo teste."""
+        if getattr(self, "_reconnect_pending", False):
+            self._reconnect_pending = False
+            com = None if self._test_mode_var.get() else self._com_var.get()
+            return com, self._cam_var.get()
+        return None
+
+    def _refresh_ports(self):
+        from serial.tools import list_ports
+        devices = [p.device for p in list_ports.comports()]
+        self._com_combo["values"] = devices
+        if devices and self._com_var.get() not in devices:
+            self._com_var.set(devices[0])
+        self.log(f"[CONEXÃO] Portas atualizadas: {devices}", "info")
+
+    def _reconectar(self):
+        if not self._test_mode_var.get() and not self._com_var.get():
+            self.log("[CONEXÃO] Selecione uma porta COM ou ative o modo teste", "warn")
+            return
+        self._reconnect_pending = True
+        if self._test_mode_var.get():
+            self.log(f"[CONEXÃO] Modo teste ativado  CAM={self._cam_var.get()}", "info")
+        else:
+            self.log(f"[CONEXÃO] Reconectando → COM={self._com_var.get()}  CAM={self._cam_var.get()}", "info")
 
     def _register_callbacks(self):
         self.on("iniciar",  self._iniciar)
@@ -196,6 +227,76 @@ class ControlPanel:
         btn_frame = tk.Frame(root_frame, bg=BG)
         btn_frame.grid(row=0, column=2, rowspan=len(rows), sticky="n", padx=(8, 10), pady=(12, 0))
 
+        # ── CONEXÃO ─────────────────────────────────────────────────────
+        conn_header = tk.Frame(btn_frame, bg=BG)
+        conn_header.pack(fill="x", pady=(0, 6))
+        tk.Label(conn_header, text="CONEXÃO",
+                 bg=BG, fg=ACCENT,
+                 font=("Courier", 10, "bold")).pack(side="left")
+        tk.Frame(conn_header, bg="#45475a", height=1).pack(
+            side="left", fill="x", expand=True, padx=(8, 0), pady=6)
+
+        conn_card = tk.Frame(btn_frame, bg=CARD)
+        conn_card.pack(fill="x", pady=(0, 4))
+
+        # COM row
+        com_row = tk.Frame(conn_card, bg=CARD)
+        com_row.pack(fill="x", padx=8, pady=(8, 4))
+        tk.Label(com_row, text="COM", bg=CARD, fg=FG,
+                 font=("Courier", 9), width=7, anchor="w").pack(side="left")
+        from serial.tools import list_ports as _lp
+        _ports = [p.device for p in _lp.comports()]
+        self._com_var = tk.StringVar(value=_ports[0] if _ports else "")
+        self._com_combo = ttk.Combobox(
+            com_row, textvariable=self._com_var,
+            values=_ports, width=7, state="readonly",
+            font=("Courier", 9))
+        self._com_combo.pack(side="left", padx=(4, 4))
+        tk.Button(com_row, text="↻",
+                  bg=CARD, fg=ACCENT,
+                  font=("Courier", 11, "bold"), relief="flat", bd=0,
+                  cursor="hand2", activebackground=CARD, activeforeground=ACCENT,
+                  command=self._refresh_ports).pack(side="left")
+
+        tk.Frame(conn_card, bg="#45475a", height=1).pack(fill="x", padx=8)
+
+        # CAM row
+        cam_row = tk.Frame(conn_card, bg=CARD)
+        cam_row.pack(fill="x", padx=8, pady=(4, 0))
+        tk.Label(cam_row, text="CAM idx", bg=CARD, fg=FG,
+                 font=("Courier", 9), width=7, anchor="w").pack(side="left")
+        self._cam_var = tk.IntVar(value=1)
+        tk.Spinbox(cam_row, from_=0, to=5,
+                   textvariable=self._cam_var,
+                   width=4, bg="#45475a", fg=FG,
+                   buttonbackground="#45475a",
+                   relief="flat", bd=0,
+                   font=("Courier", 9)).pack(side="left", padx=(4, 0))
+
+        tk.Frame(conn_card, bg="#45475a", height=1).pack(fill="x", padx=8, pady=(6, 0))
+
+        # Sem Arduino
+        self._test_mode_var = tk.BooleanVar(value=self._initial_test_mode)
+        tk.Checkbutton(conn_card,
+                       text="Sem Arduino (modo teste)",
+                       variable=self._test_mode_var,
+                       bg=CARD, fg=FG,
+                       selectcolor="#45475a",
+                       activebackground=CARD, activeforeground=FG,
+                       font=("Courier", 8)).pack(anchor="w", padx=8, pady=(4, 8))
+
+        tk.Button(btn_frame,
+                  text="🔌 Reconectar",
+                  bg="#94e2d5", fg="#1e1e2e",
+                  font=("Courier", 9, "bold"),
+                  relief="flat", bd=0,
+                  padx=16, pady=8, width=14, cursor="hand2",
+                  activebackground="#94e2d5", activeforeground="#1e1e2e",
+                  command=self._reconectar).pack(fill="x", pady=(0, 4))
+
+        tk.Frame(btn_frame, bg="#45475a", height=1).pack(fill="x", pady=(0, 10))
+
+        # ── AÇÕES ───────────────────────────────────────────────────────
         tk.Label(btn_frame, text="AÇÕES",
                  bg=BG, fg=ACCENT,
                  font=("Courier", 10, "bold")).pack(anchor="w", pady=(0, 8))
@@ -224,6 +325,57 @@ class ControlPanel:
                 command=lambda k=key: self._fire(k),
             )
             btn.pack(fill="x", pady=4)
+
+        # ── MENSAGERIA ──────────────────────────────────────────────────
+        if self._dashboard_url:
+            import webbrowser
+            tk.Frame(btn_frame, bg="#45475a", height=1).pack(fill="x", pady=(12, 6))
+
+            msg_header = tk.Frame(btn_frame, bg=BG)
+            msg_header.pack(fill="x", pady=(0, 4))
+            tk.Label(msg_header, text="MENSAGERIA",
+                     bg=BG, fg=ACCENT,
+                     font=("Courier", 10, "bold")).pack(side="left")
+            tk.Frame(msg_header, bg="#45475a", height=1).pack(
+                side="left", fill="x", expand=True, padx=(8, 0), pady=6)
+
+            msg_card = tk.Frame(btn_frame, bg=CARD)
+            msg_card.pack(fill="x")
+
+            tk.Label(msg_card,
+                     text=f"API: {self._dashboard_url}",
+                     bg=CARD, fg="#6c7086",
+                     font=("Courier", 7),
+                     wraplength=170).pack(padx=8, pady=(6, 2))
+
+            tk.Button(msg_card,
+                      text="🚗 Abrir Digital Twin",
+                      bg="#a6e3a1", fg="#1e1e2e",
+                      font=("Courier", 8, "bold"),
+                      relief="flat", bd=0,
+                      padx=8, pady=6,
+                      cursor="hand2",
+                      activebackground="#a6e3a1", activeforeground="#1e1e2e",
+                      command=lambda: webbrowser.open(self._dashboard_url)
+                      ).pack(fill="x", padx=8, pady=(0, 4))
+
+            _copy_btn = tk.Button(msg_card,
+                      text="📋 Copiar link",
+                      bg="#45475a", fg="#cdd6f4",
+                      font=("Courier", 8, "bold"),
+                      relief="flat", bd=0,
+                      padx=8, pady=6,
+                      cursor="hand2",
+                      activebackground="#45475a", activeforeground="#cdd6f4")
+            _copy_btn.pack(fill="x", padx=8, pady=(0, 8))
+
+            def _copy_link(btn=_copy_btn):
+                self.root.clipboard_clear()
+                self.root.clipboard_append(self._dashboard_url)
+                btn.config(text="✔ Copiado!")
+                self.root.after(1500, lambda: btn.config(text="📋 Copiar link"))
+
+            _copy_btn.config(command=_copy_link)
 
         # ── Log ─────────────────────────────────────────────────────────
         log_outer = tk.Frame(root_frame, bg=BG)
@@ -308,6 +460,33 @@ class ControlPanel:
 
     def get(self, section, label):
         return self.vars[f"{section}_{label}"].get()
+
+    def _poll_server(self):
+        import threading, urllib.request, json as _json
+        def _fetch():
+            try:
+                with urllib.request.urlopen(
+                    f"{self._dashboard_url}/api/config", timeout=1
+                ) as r:
+                    cfg = _json.loads(r.read())
+                self.root.after(0, lambda: self._apply_config(cfg))
+            except Exception:
+                pass
+        threading.Thread(target=_fetch, daemon=True).start()
+        self.root.after(2000, self._poll_server)
+
+    def _apply_config(self, cfg):
+        for key, var in self.vars.items():
+            if key in cfg:
+                val = cfg[key]
+                var.set(val)
+                if key in self.val_labels:
+                    self.val_labels[key].config(text=str(val))
+        running = cfg.get("running")
+        if running is True and not self.running:
+            self._iniciar()
+        elif running is False and self.running:
+            self._parar()
 
     def run(self):
         self.root.mainloop()

@@ -1,6 +1,9 @@
 import time
 import threading
 import json
+import logging
+import ctypes
+import os
 
 import cv2
 import numpy as np
@@ -11,6 +14,10 @@ from CtrlPanel import ControlPanel
 from imageProcess import laneDetectionPipeline, getFrameDimensions
 from hud import drawDots, addInfo
 from signDetector import SignDetector
+from messaging.messaging_core import (
+    app as dashboard_app, get_local_ip, update_state,
+    pop_config_update, load_config_from_file,
+)
 
 
 def pidHub(erro, pid_straight, pid_curve, dt=0.2):
@@ -20,11 +27,14 @@ def pidHub(erro, pid_straight, pid_curve, dt=0.2):
 
 
 def mainLoop():
-    cv2.namedWindow("Visão", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Visão", 960, 700)
+    global cap
 
-    ser = serial.Serial(COM, 9600, timeout=1)
-    time.sleep(2)
+    cv2.namedWindow("AutoCar", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("AutoCar", 960, 700)
+
+    ser = serial.Serial(COM, 9600, timeout=1) if COM else None
+    if ser:
+        time.sleep(2)
 
     error = 0
     angle = 0
@@ -32,8 +42,56 @@ def mainLoop():
     last_rx   = "Stand by..."
     last_run  = None
     prev_flags = (False, False, False)
-    
+
     while True:
+        # ── Reconexão dinâmica (solicitada pelo painel) ───────────────
+        # ── Sync from web panel ──────────────────────────────────────────
+        _web_cfg = pop_config_update()
+        if _web_cfg is not None:
+            _web_running = _web_cfg.pop("running", None)
+            _web_cfg.pop("_save", None)
+            try:
+                with open("config.json", "w", encoding="utf-8") as _cf:
+                    json.dump(_web_cfg, _cf, indent=4)
+                panel.root.after(0, panel._resetar)
+            except Exception:
+                pass
+            if _web_running is not None:
+                if _web_running:
+                    panel.root.after(0, panel._iniciar)
+                else:
+                    panel.root.after(0, panel._parar)
+
+        req = panel.get_connection()
+        if req:
+            new_com, new_cam_idx = req
+            if ser is not None:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+            if new_com is not None:
+                try:
+                    ser = serial.Serial(new_com, 9600, timeout=1)
+                    time.sleep(2)
+                    panel.log(f"[SERIAL] Reconectado: {new_com}", "ok")
+                except Exception as e:
+                    ser = None
+                    panel.log(f"[SERIAL] Falha em {new_com}: {e}", "error")
+            else:
+                ser = None
+                panel.log("[SERIAL] Modo teste — sem Arduino", "info")
+            _nc = cv2.VideoCapture(new_cam_idx, cv2.CAP_DSHOW)
+            _nc.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            _nc.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            if _nc.isOpened() and _nc.read()[0]:
+                cap.release()   # só libera a antiga depois de confirmar a nova
+                cap = _nc
+                panel.log(f"[CAM] Reconectada: indice {new_cam_idx}", "ok")
+            else:
+                _nc.release()
+                panel.log(f"[CAM] Falha no indice {new_cam_idx} — mantendo camera atual", "warn")
+
         ret, frame = cap.read()
         if not ret:
             break
@@ -110,15 +168,16 @@ def mainLoop():
 
         error, limiar_bgr, lane_state = laneDetectionPipeline(ROI_H, ROI_W, limiar, limiar_bgr, last_error=error)
 
+        # ── Digital Twin ──────────────────────────────────────────────
+        effective_pwm = (0 if (flag_stop or flag_sv) else pwm) if run else 0
+        update_state(effective_pwm, run)
+
         # ── Envio de dados para o Arduino ─────────────────────────────
         if run:
             now = time.time() * 1000
             if now - last_send >= 200:
                 last_send = now
                 angle = pidHub(error, pid_straight, pid_curve, dt=0.2)
-
-                # STOP ou semáforo vermelho → zera PWM
-                effective_pwm = 0 if (flag_stop or flag_sv) else pwm
 
                 data = {
                     "DEVIATION": False,
@@ -130,8 +189,14 @@ def mainLoop():
                 }
 
                 msg = json.dumps(data) + '\n'
-                ser.write(msg.encode('utf-8'))
-                panel.log(f"TX → {msg.strip()}", "tx")
+                if ser is not None:
+                    try:
+                        ser.write(msg.encode('utf-8'))
+                        panel.log(f"TX → {msg.strip()}", "tx")
+                    except serial.SerialException as e:
+                        panel.log(f"[SERIAL] Falha ao enviar: {e}", "warn")
+                else:
+                    panel.log(f"[TESTE] TX → {msg.strip()}", "tx")
 
         else:
             if last_run != False:  # só envia uma vez ao parar
@@ -144,17 +209,27 @@ def mainLoop():
                     "PWM":       0,
                 }
                 msg = json.dumps(data) + '\n'
-                ser.write(msg.encode('utf-8'))
-                panel.log(f"TX → {msg.strip()}", "tx")
+                if ser is not None:
+                    try:
+                        ser.write(msg.encode('utf-8'))
+                        panel.log(f"TX → {msg.strip()}", "tx")
+                    except serial.SerialException as e:
+                        panel.log(f"[SERIAL] Falha ao enviar: {e}", "warn")
+                else:
+                    panel.log(f"[TESTE] TX → {msg.strip()}", "tx")
                 panel.log("[CONTROLE MANUAL] veículo parado pelo painel de controle", "warn")
 
         last_run = run
 
-        if ser.in_waiting:
-            response = ser.readline().decode('utf-8', errors='ignore').strip()
-            if response:
-                last_rx = response  # ← atualiza a última mensagem recebida
-                panel.log(f"RX ← {response}", "rx")
+        if ser is not None:
+            try:
+                if ser.in_waiting:
+                    response = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if response:
+                        last_rx = response
+                        panel.log(f"RX ← {response}", "rx")
+            except serial.SerialException as e:
+                panel.log(f"[SERIAL] Falha ao receber: {e}", "warn")
 
         # ── Dashboard ──────────────────────────────────────
         sign_det.draw(img)
@@ -172,48 +247,95 @@ def mainLoop():
                        flag_stop, flag_sg, flag_sv)
 
         dashboard = np.vstack((img_view, info))
-        cv2.imshow("Visão", dashboard)
+        cv2.imshow("AutoCar", dashboard)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()
-    ser.close()
+    if ser is not None:
+        ser.close()
     cv2.destroyAllWindows()
+
+# ── Cores ANSI (habilita VT100 no Windows) ────────────────────────────────
+try:
+    ctypes.windll.kernel32.SetConsoleMode(
+        ctypes.windll.kernel32.GetStdHandle(-11), 7
+    )
+except Exception:
+    pass
+_G  = "\033[92m"   # verde
+_Y  = "\033[93m"   # amarelo
+_C  = "\033[96m"   # ciano
+_R  = "\033[91m"   # vermelho
+_B  = "\033[1m"    # negrito
+_RS = "\033[0m"    # reset
+
 
 def _select_com() -> str:
     from serial.tools import list_ports
-    ports = [p.device for p in list_ports.comports()]
+    ports = list(list_ports.comports())
     if not ports:
-        com = input("[COM] Nenhuma porta detectada. Digite manualmente (ex: COM3): ").strip()
-        return com or "COM5"
-    if len(ports) == 1:
-        print(f"[COM] Porta detectada automaticamente: {ports[0]}")
-        return ports[0]
-    print("[COM] Portas disponíveis:")
+        return (input(f"{_Y}{_B}[COM]{_RS} Nenhuma porta detectada. Digite manualmente (ex: COM3): ").strip() or "COM5")
+    print(f"{_C}{_B}[COM]{_RS} Portas detectadas:")
     for i, p in enumerate(ports):
-        print(f"  [{i}] {p}")
+        desc = p.description if (p.description and p.description != p.device) else "dispositivo USB"
+        print(f"  {_C}[{i}]{_RS} {_B}{p.device}{_RS}  —  {desc}")
+    print(f"  {_C}[t]{_RS} Modo teste (sem Arduino)")
+    raw = input(f"{_Y}{_B}[COM]{_RS} Escolha o número (0-{len(ports)-1}) ou 't': ").strip().lower()
+    if raw == "t":
+        print(f"{_G}{_B}[COM]{_RS} Modo teste — sem Arduino")
+        return None
     try:
-        idx = int(input(f"[COM] Escolha o número (0-{len(ports)-1}): ").strip())
-        return ports[idx]
+        chosen = ports[int(raw)].device
     except (ValueError, IndexError):
-        print(f"[COM] Entrada inválida, usando {ports[0]}")
-        return ports[0]
+        chosen = ports[0].device
+        print(f"{_Y}{_B}[COM]{_RS} Entrada inválida, usando {_G}{chosen}{_RS}")
+    print(f"{_G}{_B}[COM]{_RS} Usando: {_G}{_B}{chosen}{_RS}")
+    return chosen
 
 
 def _open_camera() -> cv2.VideoCapture:
     for idx in (1, 0):
+        print(f"{_C}{_B}[CAM]{_RS} Tentando índice {idx}...")
         c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
         c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         if c.isOpened() and c.read()[0]:
-            print(f"[CAM] Camera aberta no indice {idx}")
+            print(f"{_G}{_B}[CAM]{_RS} Câmera aberta no índice {_G}{_B}{idx}{_RS}")
             return c
         c.release()
-    print("[ERRO] Nenhuma camera disponivel (indices 0 e 1 falharam).")
+    print(f"{_R}{_B}[ERRO]{_RS} Nenhuma câmera disponível (índices 0 e 1 falharam).")
     exit()
 
+# ── Silencia o Werkzeug antes de subir a thread ────────────────────────────
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+load_config_from_file()
+
+_DASHBOARD_PORT = 5000
+_dashboard_ip   = get_local_ip()
+
+# Libera a porta no Firewall do Windows (silencioso — requer admin na primeira vez)
+try:
+    import subprocess
+    subprocess.run([
+        "netsh", "advfirewall", "firewall", "add", "rule",
+        f"name=AutoCar-Dashboard-{_DASHBOARD_PORT}",
+        "dir=in", "action=allow", "protocol=TCP",
+        f"localport={_DASHBOARD_PORT}",
+    ], capture_output=True, check=False, timeout=5)
+except Exception:
+    pass
+
+threading.Thread(
+    target=lambda: dashboard_app.run(host="0.0.0.0", port=_DASHBOARD_PORT,
+                                     debug=False, use_reloader=False),
+    daemon=True,
+).start()
+
+COM = _select_com()
 cap = _open_camera()
+print(f"{_C}{_B}[Dashboard]{_RS} http://{_dashboard_ip}:{_DASHBOARD_PORT}/")
 ret, frame = cap.read()
 
 if not ret:
@@ -227,11 +349,14 @@ pid_curve = PID(Kp=0, Ki=0, Kd=0, output_limit=90.0)
 
 ROI_W = 320
 ROI_H = 240
-COM = _select_com()
 
 sign_det = SignDetector("model/traffic_sign_detector.pt")
 
-panel = ControlPanel(width, height)
+_twin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "AutoCar-DigitalTwin", "index.html")
+panel = ControlPanel(width, height, test_mode=(COM is None),
+                     dashboard_url=f"http://{_dashboard_ip}:{_DASHBOARD_PORT}",
+                     twin_path=_twin_path if os.path.exists(_twin_path) else "")
 t = threading.Thread(target=mainLoop, daemon=True)
 t.start()
 
