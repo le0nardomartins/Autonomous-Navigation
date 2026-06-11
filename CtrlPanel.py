@@ -19,9 +19,11 @@ class ControlPanel:
         self._dashboard_url = dashboard_url
         self._twin_path     = twin_path
 
-        self.vars       = {}
-        self.val_labels = {}
-        self.callbacks  = {}
+        self.vars               = {}
+        self.val_labels         = {}
+        self.callbacks          = {}
+        self._last_local_change = 0.0
+        self._applying_server   = False
         self._build_ui()
         self._register_callbacks()
         if self._dashboard_url:
@@ -33,10 +35,14 @@ class ControlPanel:
     def _iniciar(self):
         self.running = True
         self.log("[PAINEL] Iniciando movimento", "info")
+        if self._dashboard_url and not self._applying_server:
+            self._push_key("running", True)
 
     def _parar(self):
         self.running = False
         self.log("[CONTROLE MANUAL] veículo parado pelo painel de controle", "warn")
+        if self._dashboard_url and not self._applying_server:
+            self._push_key("running", False)
 
     def _salvar(self):
         with open("config.json", "w") as f:
@@ -212,11 +218,15 @@ class ControlPanel:
                     val_label.pack(side="right")
                     self.val_labels[key] = val_label
 
-                    def make_cmd(vl):
-                        return lambda val: vl.config(text=str(int(float(val))))
+                    def make_cmd(vl, k):
+                        def cmd(val):
+                            vl.config(text=str(int(float(val))))
+                            if self._dashboard_url:
+                                self._push_key(k, int(float(val)))
+                        return cmd
 
                     slider = ttk.Scale(row_frame, from_=mn, to=mx, orient="horizontal",
-                                       variable=var, command=make_cmd(val_label),
+                                       variable=var, command=make_cmd(val_label, key),
                                        length=180)
                     slider.pack(fill="x", pady=(2, 0))
 
@@ -475,7 +485,29 @@ class ControlPanel:
         threading.Thread(target=_fetch, daemon=True).start()
         self.root.after(2000, self._poll_server)
 
+    def _push_key(self, key, val):
+        if self._applying_server:
+            return
+        self._last_local_change = time.time()
+        import threading, urllib.request, json as _json
+        def _post():
+            try:
+                data = _json.dumps({key: val}).encode()
+                req = urllib.request.Request(
+                    f"{self._dashboard_url}/api/config",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=1)
+            except Exception:
+                pass
+        threading.Thread(target=_post, daemon=True).start()
+
     def _apply_config(self, cfg):
+        if time.time() - self._last_local_change < 3.0:
+            return
+        self._applying_server = True
         for key, var in self.vars.items():
             if key in cfg:
                 val = cfg[key]
@@ -487,6 +519,7 @@ class ControlPanel:
             self._iniciar()
         elif running is False and self.running:
             self._parar()
+        self._applying_server = False
 
     def run(self):
         self.root.mainloop()

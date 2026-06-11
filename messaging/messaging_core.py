@@ -137,52 +137,128 @@ _PANEL_HTML = """<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AutoCar — Painel de Controle</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#181825">
+<title>AutoCar — Painel</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#1e1e2e;color:#cdd6f4;font-family:'Courier New',monospace;min-height:100vh}
-header{background:#181825;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #45475a;position:sticky;top:0;z-index:10}
-header h1{font-size:15px;color:#cdd6f4;flex:1;letter-spacing:1px}
-.back-btn{background:#89b4fa;color:#1e1e2e;border:none;padding:7px 14px;border-radius:6px;font-family:inherit;font-size:12px;font-weight:bold;cursor:pointer}
-.back-btn:hover{opacity:.85}
-.actions{display:flex;gap:8px;padding:14px 16px 0}
-.btn{flex:1;padding:12px;border:none;border-radius:6px;font-family:inherit;font-size:13px;font-weight:bold;cursor:pointer;transition:opacity .15s}
-.btn:hover{opacity:.85}
-.btn-start{background:#a6e3a1;color:#1e1e2e}
-.btn-stop{background:#f38ba8;color:#1e1e2e}
-.btn-save{background:#cba6f7;color:#1e1e2e}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 16px}
-@media(max-width:600px){.grid{grid-template-columns:1fr}}
-.section{background:#181825;border-radius:8px;padding:14px}
-.section-title{color:#89b4fa;font-size:10px;font-weight:bold;letter-spacing:1.5px;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #45475a}
-.ctrl{margin-bottom:10px}
-.ctrl:last-child{margin-bottom:0}
-.ctrl-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;color:#cdd6f4}
-.ctrl-label span{color:#89b4fa;font-weight:bold;min-width:36px;text-align:right}
-input[type=range]{width:100%;accent-color:#89b4fa;cursor:pointer}
-.status-bar{text-align:center;font-size:10px;color:#6c7086;padding:8px 0 16px;letter-spacing:.5px}
-.running-indicator{display:inline-block;width:7px;height:7px;border-radius:50%;background:#45475a;margin-right:5px;vertical-align:middle;transition:background .3s}
-.running-indicator.on{background:#a6e3a1;box-shadow:0 0 6px #a6e3a1}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#1e1e2e;--surface:#181825;--card:#313244;--border:#45475a;
+  --fg:#cdd6f4;--muted:#6c7086;--blue:#89b4fa;--green:#a6e3a1;
+  --red:#f38ba8;--purple:#cba6f7;--teal:#94e2d5;
+  --radius:10px;--font:'Courier New',monospace;
+}
+html{height:100%;overflow-x:hidden}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);min-height:100%;padding-bottom:env(safe-area-inset-bottom)}
+
+/* ── Header ── */
+header{
+  background:var(--surface);padding:14px 16px;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:20;
+  padding-top:calc(14px + env(safe-area-inset-top));
+}
+header h1{font-size:14px;color:var(--fg);flex:1;letter-spacing:1px;white-space:nowrap}
+.back-btn{
+  background:var(--blue);color:#1e1e2e;border:none;
+  padding:9px 14px;border-radius:8px;
+  font-family:var(--font);font-size:12px;font-weight:bold;
+  cursor:pointer;white-space:nowrap;min-height:40px;
+  -webkit-appearance:none;
+}
+.back-btn:active{opacity:.75}
+
+/* ── Status pill ── */
+.status-pill{
+  display:flex;align-items:center;gap:6px;
+  background:var(--card);border-radius:20px;
+  padding:6px 12px;margin:12px 16px 0;font-size:11px;color:var(--muted);
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background .3s,box-shadow .3s}
+.dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+#statusText{flex:1}
+
+/* ── Action buttons ── */
+.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px 16px 0}
+.btn{
+  padding:14px 8px;border:none;border-radius:var(--radius);
+  font-family:var(--font);font-size:13px;font-weight:bold;
+  cursor:pointer;min-height:50px;-webkit-appearance:none;
+  transition:opacity .1s,transform .1s;
+}
+.btn:active{opacity:.75;transform:scale(.97)}
+.btn-start{background:var(--green);color:#1e1e2e}
+.btn-stop {background:var(--red);color:#1e1e2e}
+.btn-save {background:var(--purple);color:#1e1e2e}
+
+/* ── Grid ── */
+.grid{display:grid;grid-template-columns:1fr;gap:10px;padding:12px 16px 24px}
+@media(min-width:560px){.grid{grid-template-columns:1fr 1fr}}
+@media(min-width:900px){.grid{grid-template-columns:1fr 1fr 1fr}}
+
+/* ── Section card ── */
+.section{background:var(--surface);border-radius:var(--radius);padding:14px 16px;border:1px solid var(--border)}
+.section-title{
+  color:var(--blue);font-size:10px;font-weight:bold;letter-spacing:1.8px;
+  margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);
+  text-transform:uppercase;
+}
+
+/* ── Control row ── */
+.ctrl{padding:6px 0}
+.ctrl+.ctrl{border-top:1px solid var(--border)}
+.ctrl-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.ctrl-label{font-size:12px;color:var(--fg)}
+.ctrl-val{
+  font-size:13px;font-weight:bold;color:var(--blue);
+  min-width:42px;text-align:right;
+}
+
+/* ── Range slider ── */
+.range-wrap{position:relative;height:36px;display:flex;align-items:center}
+input[type=range]{
+  width:100%;height:4px;
+  -webkit-appearance:none;appearance:none;
+  background:var(--border);border-radius:2px;cursor:pointer;
+  outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:22px;height:22px;border-radius:50%;
+  background:var(--blue);cursor:pointer;
+  box-shadow:0 1px 4px rgba(0,0,0,.5);
+}
+input[type=range]::-moz-range-thumb{
+  width:22px;height:22px;border-radius:50%;border:none;
+  background:var(--blue);cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{border-radius:2px}
 </style>
 </head>
 <body>
+
 <header>
   <h1>⚙ Painel de Controle</h1>
   <button class="back-btn" onclick="window.location.href='/'">← Digital Twin</button>
 </header>
 
+<div class="status-pill">
+  <div class="dot" id="runDot"></div>
+  <span id="statusText">Carregando...</span>
+</div>
+
 <div class="actions">
-  <button class="btn btn-start" id="btnStart" onclick="setRunning(true)">▶ Iniciar</button>
-  <button class="btn btn-stop"  id="btnStop"  onclick="setRunning(false)">■ Parar</button>
+  <button class="btn btn-start" onclick="setRunning(true)">▶ Iniciar</button>
+  <button class="btn btn-stop"  onclick="setRunning(false)">■ Parar</button>
   <button class="btn btn-save"  onclick="saveConfig()">💾 Salvar</button>
 </div>
 
 <div class="grid" id="grid"></div>
-<p class="status-bar" id="status"><span class="running-indicator" id="runDot"></span>Carregando...</p>
 
 <script>
-const SECTIONS = [
+const SECTIONS=[
   {title:"ROI",controls:[
     {key:"ROI_Linha superior",label:"Linha superior",min:0,max:1280},
     {key:"ROI_Linha inferior",label:"Linha inferior",min:0,max:1280},
@@ -190,8 +266,8 @@ const SECTIONS = [
     {key:"ROI_Altura inf",    label:"Altura inf",    min:0,max:720},
   ]},
   {title:"IMAGEM",controls:[
-    {key:"IMAGEM_Limiar",             label:"Limiar",             min:0,max:255},
-    {key:"IMAGEM_Erro de transição",label:"Erro de transição",min:0,max:100},
+    {key:"IMAGEM_Limiar",            label:"Limiar",            min:0,max:255},
+    {key:"IMAGEM_Erro de transição", label:"Erro de transição", min:0,max:100},
   ]},
   {title:"RETA — PID",controls:[
     {key:"RETA_Kp",label:"Kp",min:0,max:1000},
@@ -208,19 +284,19 @@ const SECTIONS = [
   ]},
 ];
 
-let debounceTimer=null, pendingUpdate={}, currentConfig={};
+let debounceTimer=null,pendingUpdate={},currentConfig={};
 
 function buildUI(cfg){
   currentConfig=cfg;
   const grid=document.getElementById('grid');
   grid.innerHTML='';
   SECTIONS.forEach((sec,si)=>{
-    const div=document.createElement('div');
-    div.className='section';
+    const card=document.createElement('div');
+    card.className='section';
     const title=document.createElement('div');
     title.className='section-title';
     title.textContent=sec.title;
-    div.appendChild(title);
+    card.appendChild(title);
     sec.controls.forEach((ctrl,ci)=>{
       const id=`c${si}_${ci}`;
       const val=cfg[ctrl.key]??ctrl.min;
@@ -228,31 +304,39 @@ function buildUI(cfg){
       row.className='ctrl';
       row.dataset.key=ctrl.key;
       row.innerHTML=`
-        <div class="ctrl-label"><label>${ctrl.label}</label><span id="${id}L">${val}</span></div>
-        <input type="range" id="${id}I" min="${ctrl.min}" max="${ctrl.max}" value="${val}">`;
-      div.appendChild(row);
+        <div class="ctrl-header">
+          <span class="ctrl-label">${ctrl.label}</span>
+          <span class="ctrl-val" id="${id}L">${val}</span>
+        </div>
+        <div class="range-wrap">
+          <input type="range" id="${id}I" min="${ctrl.min}" max="${ctrl.max}" value="${val}">
+        </div>`;
+      card.appendChild(row);
       row.querySelector('input').addEventListener('input',function(){
         const v=parseInt(this.value);
         document.getElementById(id+'L').textContent=v;
         currentConfig[ctrl.key]=v;
         pendingUpdate[ctrl.key]=v;
         clearTimeout(debounceTimer);
-        debounceTimer=setTimeout(flushUpdate,300);
+        debounceTimer=setTimeout(flushUpdate,350);
       });
     });
-    grid.appendChild(div);
+    grid.appendChild(card);
   });
-  updateRunIndicator(cfg.running);
+  updateRunDot(cfg.running);
 }
 
-function updateRunIndicator(running){
-  const dot=document.getElementById('runDot');
-  dot.className='running-indicator'+(running?' on':'');
+function updateRunDot(running){
+  document.getElementById('runDot').className='dot'+(running?' on':'');
+}
+
+function setStatus(msg){
+  document.getElementById('statusText').textContent=msg;
 }
 
 function flushUpdate(){
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pendingUpdate)})
-    .then(()=>{pendingUpdate={};setStatus('Salvo • '+new Date().toLocaleTimeString())})
+    .then(()=>{pendingUpdate={};setStatus('Salvo '+new Date().toLocaleTimeString())})
     .catch(()=>setStatus('Erro ao salvar'));
 }
 
@@ -264,11 +348,8 @@ function saveConfig(){
 function setRunning(val){
   currentConfig.running=val;
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({running:val})})
-    .then(()=>{updateRunIndicator(val);setStatus(val?'Iniciado':'Parado');});
-}
-
-function setStatus(msg){
-  document.getElementById('status').innerHTML='<span class="running-indicator'+(currentConfig.running?' on':'')+'" id="runDot"></span>'+msg;
+    .then(()=>{updateRunDot(val);setStatus(val?'Iniciado':'Parado')})
+    .catch(()=>setStatus('Sem conexão'));
 }
 
 async function syncConfig(){
@@ -278,14 +359,16 @@ async function syncConfig(){
       const key=row.dataset.key;
       if(pendingUpdate[key]!==undefined)return;
       const inp=row.querySelector('input');
-      const lbl=row.querySelector('span');
+      const lbl=row.querySelector('.ctrl-val');
       if(inp&&cfg[key]!==undefined){inp.value=cfg[key];lbl.textContent=cfg[key];}
     });
-    if(cfg.running!==undefined)updateRunIndicator(cfg.running);
+    if(cfg.running!==undefined)updateRunDot(cfg.running);
   }catch{}
 }
 
-fetch('/api/config').then(r=>r.json()).then(cfg=>{buildUI(cfg);setStatus('Conectado');}).catch(()=>setStatus('Sem conexão'));
+fetch('/api/config').then(r=>r.json())
+  .then(cfg=>{buildUI(cfg);setStatus(cfg.running?'Em execução':'Parado');})
+  .catch(()=>setStatus('Sem conexão'));
 setInterval(syncConfig,2000);
 </script>
 </body>

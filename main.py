@@ -15,9 +15,9 @@ from imageProcess import laneDetectionPipeline, getFrameDimensions
 from hud import drawDots, addInfo
 from signDetector import SignDetector
 from messaging.messaging_core import (
-    app as dashboard_app, get_local_ip, update_state,
-    pop_config_update, load_config_from_file,
+    app as dashboard_app, get_local_ip, update_state, load_config_from_file,
 )
+from vision.calibration import FisheyeCorrector
 
 
 def pidHub(erro, pid_straight, pid_curve, dt=0.2):
@@ -45,23 +45,6 @@ def mainLoop():
 
     while True:
         # ── Reconexão dinâmica (solicitada pelo painel) ───────────────
-        # ── Sync from web panel ──────────────────────────────────────────
-        _web_cfg = pop_config_update()
-        if _web_cfg is not None:
-            _web_running = _web_cfg.pop("running", None)
-            _web_cfg.pop("_save", None)
-            try:
-                with open("config.json", "w", encoding="utf-8") as _cf:
-                    json.dump(_web_cfg, _cf, indent=4)
-                panel.root.after(0, panel._resetar)
-            except Exception:
-                pass
-            if _web_running is not None:
-                if _web_running:
-                    panel.root.after(0, panel._iniciar)
-                else:
-                    panel.root.after(0, panel._parar)
-
         req = panel.get_connection()
         if req:
             new_com, new_cam_idx = req
@@ -299,8 +282,6 @@ def _open_camera() -> cv2.VideoCapture:
     for idx in (1, 0):
         print(f"{_C}{_B}[CAM]{_RS} Tentando índice {idx}...")
         c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-        c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         if c.isOpened() and c.read()[0]:
             print(f"{_G}{_B}[CAM]{_RS} Câmera aberta no índice {_G}{_B}{idx}{_RS}")
             return c
@@ -352,8 +333,10 @@ ROI_H = 240
 
 sign_det = SignDetector("model/traffic_sign_detector.pt")
 
-_twin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "AutoCar-DigitalTwin", "index.html")
+_twin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"AutoCar-DigitalTwin", "index.html")
+
+corrector = FisheyeCorrector("calibration/fisheye_calibration.npz", width, height, balance=0.5)
+
 panel = ControlPanel(width, height, test_mode=(COM is None),
                      dashboard_url=f"http://{_dashboard_ip}:{_DASHBOARD_PORT}",
                      twin_path=_twin_path if os.path.exists(_twin_path) else "")
