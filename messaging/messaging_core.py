@@ -258,6 +258,23 @@ input[type=range]::-moz-range-thumb{
   background:var(--blue);cursor:pointer;
 }
 input[type=range]::-webkit-slider-runnable-track{border-radius:2px}
+
+/* ── Edit toggle ── */
+.edit-btn{
+  background:transparent;border:1.5px solid var(--muted);color:var(--muted);
+  padding:8px 10px;border-radius:8px;cursor:pointer;min-height:40px;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .2s,color .2s,background .2s;
+  -webkit-appearance:none;flex-shrink:0;
+}
+.edit-btn:active{opacity:.75}
+.edit-btn.active{border-color:var(--blue);color:var(--blue);background:rgba(137,180,250,.12)}
+.edit-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Sliders bloqueados ── */
+input[type=range]:disabled{opacity:.35;cursor:not-allowed}
+input[type=range]:disabled::-webkit-slider-thumb{background:var(--muted);cursor:not-allowed;box-shadow:none}
+input[type=range]:disabled::-moz-range-thumb{background:var(--muted);cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -265,6 +282,9 @@ input[type=range]::-webkit-slider-runnable-track{border-radius:2px}
 <div class="top-bar">
   <header>
     <h1>⚙ Painel de Controle</h1>
+    <button class="edit-btn" id="editBtn" title="Editar configurações" onclick="toggleEdit()">
+      <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
     <button class="back-btn" onclick="window.location.href='/'">← Digital Twin</button>
   </header>
 
@@ -313,7 +333,13 @@ const SECTIONS=[
   ]},
 ];
 
-let debounceTimer=null,pendingUpdate={},currentConfig={};
+let debounceTimer=null,pendingUpdate={},currentConfig={},editMode=false;
+
+function toggleEdit(){
+  editMode=!editMode;
+  document.getElementById('editBtn').classList.toggle('active',editMode);
+  document.querySelectorAll('input[type=range]').forEach(el=>{el.disabled=!editMode});
+}
 
 function buildUI(cfg){
   currentConfig=cfg;
@@ -338,7 +364,7 @@ function buildUI(cfg){
           <span class="ctrl-val" id="${id}L">${val}</span>
         </div>
         <div class="range-wrap">
-          <input type="range" id="${id}I" min="${ctrl.min}" max="${ctrl.max}" value="${val}">
+          <input type="range" id="${id}I" min="${ctrl.min}" max="${ctrl.max}" value="${val}" disabled>
         </div>`;
       card.appendChild(row);
       row.querySelector('input').addEventListener('input',function(){
