@@ -32,9 +32,13 @@ def mainLoop():
     cv2.namedWindow("AutoCar", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("AutoCar", 960, 700)
 
-    ser = serial.Serial(COM, 9600, timeout=1) if COM else None
-    if ser:
-        time.sleep(2)
+    try:
+        ser = serial.Serial(COM, 9600, timeout=1) if COM else None
+        if ser:
+            time.sleep(2)
+    except serial.SerialException as e:
+        panel.log(f"[SERIAL] Não foi possível abrir {COM}: {e}", "error")
+        ser = None
 
     error = 0
     angle = 0
@@ -288,7 +292,11 @@ def _select_com() -> str:
     from serial.tools import list_ports
     ports = list(list_ports.comports())
     if not ports:
-        return (input(f"{_Y}{_B}[COM]{_RS} Nenhuma porta detectada. Digite manualmente (ex: COM3): ").strip() or "COM5")
+        raw = input(f"{_Y}{_B}[COM]{_RS} Nenhuma porta detectada. Digite manualmente ou Enter para modo teste: ").strip()
+        if not raw:
+            print(f"{_G}{_B}[COM]{_RS} Modo teste — sem Arduino")
+            return None
+        return raw
     print(f"{_C}{_B}[COM]{_RS} Portas detectadas:")
     for i, p in enumerate(ports):
         desc = p.description if (p.description and p.description != p.device) else "dispositivo USB"
@@ -368,7 +376,10 @@ sign_det = SignDetector("model/traffic_sign_detector.pt")
 
 _twin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"AutoCar-DigitalTwin", "index.html")
 
-corrector = FisheyeCorrector("calibration/fisheye_calibration.npz", width, height, balance=0.5)
+try:
+    corrector = FisheyeCorrector("calibration/fisheye_calibration.npz", width, height, balance=0.5)
+except FileNotFoundError:
+    corrector = None
 
 panel = ControlPanel(width, height, test_mode=(COM is None),
                      dashboard_url=f"http://{_dashboard_ip}:{_DASHBOARD_PORT}",

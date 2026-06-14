@@ -13,9 +13,6 @@ class SignDetector:
         self._stop_timer      = 0
         self._conf_threshold  = max(0.0, min(1.0, conf_threshold))
 
-    def set_conf(self, value: float) -> None:
-        self._conf_threshold = max(0.0, min(1.0, value))
-
         try:
             from ultralytics import YOLO
             p = Path(model_path)
@@ -27,6 +24,9 @@ class SignDetector:
                 print("[Sinais] Coloque o arquivo em: model/traffic_sign_detector.pt")
         except ImportError:
             print("[Sinais] ultralytics nao instalado: pip install ultralytics==8.3.5")
+
+    def set_conf(self, value: float) -> None:
+        self._conf_threshold = max(0.0, min(1.0, value))
 
     # ── API pública ───────────────────────────────────────────────────────
 

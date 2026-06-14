@@ -158,6 +158,20 @@ class ControlPanel:
             sliderlength=18,
             sliderrelief="flat",
         )
+        style.configure("TCombobox",
+            background=CARD,
+            fieldbackground=BG,
+            foreground=FG,
+            arrowcolor=ACCENT,
+            bordercolor="#45475a",
+            lightcolor=CARD,
+            darkcolor=CARD,
+        )
+        style.map("TCombobox",
+            background=[("readonly", CARD)],
+            fieldbackground=[("readonly", BG)],
+            foreground=[("readonly", FG)],
+        )
 
         sections = [
             ("ROI", [
