@@ -5,7 +5,7 @@ import os
 import time
 
 class ControlPanel:
-    def __init__(self, width, height, test_mode=False, dashboard_url="", twin_path=""):
+    def __init__(self, width, height, test_mode=False, dashboard_url="", twin_path="", initial_cam_idx=1):
         self.root = tk.Tk()
         self.root.title("Controles")
         self.root.configure(bg="#1e1e2e")
@@ -18,6 +18,7 @@ class ControlPanel:
         self._initial_test_mode = test_mode
         self._dashboard_url = dashboard_url
         self._twin_path     = twin_path
+        self._initial_cam_idx = initial_cam_idx
 
         self.vars               = {}
         self.val_labels         = {}
@@ -62,6 +63,8 @@ class ControlPanel:
                 if key in self.val_labels:
                     self.val_labels[key].config(text=str(config[key]))
         self.log("[PAINEL] Valores restaurados do config.json", "info")
+        if self._dashboard_url and not self._applying_server:
+            self._push_all(config)
 
     def get_connection(self):
         """Retorna (com, cam_idx) se reconexão foi pedida, senão None. com=None = modo teste."""
@@ -70,6 +73,46 @@ class ControlPanel:
             com = None if self._test_mode_var.get() else self._com_var.get()
             return com, self._cam_var.get()
         return None
+
+    def _show_qrcode(self):
+        try:
+            import qrcode
+            from PIL import ImageTk
+        except ImportError:
+            self.log("[QR] Instale: pip install qrcode[pil]", "error")
+            return
+        qr = qrcode.QRCode(box_size=6, border=3)
+        qr.add_data(self._dashboard_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#cdd6f4", back_color="#1e1e2e")
+        top = tk.Toplevel(self.root)
+        top.title("QR Code — Dashboard")
+        top.configure(bg="#1e1e2e")
+        top.resizable(False, False)
+        photo = ImageTk.PhotoImage(img)
+        tk.Label(top, image=photo, bg="#1e1e2e", bd=0).pack(padx=20, pady=(20, 8))
+        top._qr_photo = photo
+        tk.Label(top, text=self._dashboard_url, bg="#1e1e2e", fg="#89b4fa",
+                 font=("Courier", 8)).pack(pady=(0, 16))
+
+    def _push_all(self, data: dict):
+        if self._applying_server:
+            return
+        self._last_local_change = time.time()
+        import threading, urllib.request, json as _json
+        def _post():
+            try:
+                raw = _json.dumps(data).encode()
+                req = urllib.request.Request(
+                    f"{self._dashboard_url}/api/config",
+                    data=raw,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=1)
+            except Exception:
+                pass
+        threading.Thread(target=_post, daemon=True).start()
 
     def _refresh_ports(self):
         from serial.tools import list_ports
@@ -140,6 +183,9 @@ class ControlPanel:
             ("PARÂMETROS DO CARRO", [
                 ("PWM", config.get("PARÂMETROS DO CARRO_PWM", 40), 0, 255),
             ]),
+            ("DETECTOR", [
+                ("Confiança mín", config.get("DETECTOR_Confiança mín", 40), 0, 100),
+            ]),
         ]
 
         buttons = [
@@ -177,7 +223,7 @@ class ControlPanel:
         rows = [
             sections[0:2],
             sections[2:4],
-            [sections[4]],
+            sections[4:6],
         ]
 
         for r, row_sections in enumerate(rows):
@@ -275,7 +321,7 @@ class ControlPanel:
         cam_row.pack(fill="x", padx=8, pady=(4, 0))
         tk.Label(cam_row, text="CAM idx", bg=CARD, fg=FG,
                  font=("Courier", 9), width=7, anchor="w").pack(side="left")
-        self._cam_var = tk.IntVar(value=1)
+        self._cam_var = tk.IntVar(value=self._initial_cam_idx)
         tk.Spinbox(cam_row, from_=0, to=5,
                    textvariable=self._cam_var,
                    width=4, bg="#45475a", fg=FG,
@@ -377,7 +423,7 @@ class ControlPanel:
                       padx=8, pady=6,
                       cursor="hand2",
                       activebackground="#45475a", activeforeground="#cdd6f4")
-            _copy_btn.pack(fill="x", padx=8, pady=(0, 8))
+            _copy_btn.pack(fill="x", padx=8, pady=(0, 4))
 
             def _copy_link(btn=_copy_btn):
                 self.root.clipboard_clear()
@@ -386,6 +432,16 @@ class ControlPanel:
                 self.root.after(1500, lambda: btn.config(text="📋 Copiar link"))
 
             _copy_btn.config(command=_copy_link)
+
+            tk.Button(msg_card,
+                      text="QR Code",
+                      bg="#cba6f7", fg="#1e1e2e",
+                      font=("Courier", 8, "bold"),
+                      relief="flat", bd=0,
+                      padx=8, pady=6,
+                      cursor="hand2",
+                      activebackground="#cba6f7", activeforeground="#1e1e2e",
+                      command=self._show_qrcode).pack(fill="x", padx=8, pady=(0, 8))
 
         # ── Log ─────────────────────────────────────────────────────────
         log_outer = tk.Frame(root_frame, bg=BG)

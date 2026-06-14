@@ -6,11 +6,15 @@ class SignDetector:
     DETECT_INTERVAL  = 5    # roda YOLO a cada N frames
     STOP_WAIT_FRAMES = 90   # mantém STOP ativo ~3 s após ver a placa
 
-    def __init__(self, model_path: str):
-        self._model      = None
-        self._boxes: list = []
-        self._counter    = 0
-        self._stop_timer = 0
+    def __init__(self, model_path: str, conf_threshold: float = 0.4):
+        self._model           = None
+        self._boxes: list     = []
+        self._counter         = 0
+        self._stop_timer      = 0
+        self._conf_threshold  = max(0.0, min(1.0, conf_threshold))
+
+    def set_conf(self, value: float) -> None:
+        self._conf_threshold = max(0.0, min(1.0, value))
 
         try:
             from ultralytics import YOLO
@@ -76,7 +80,7 @@ class SignDetector:
 
     def _predict(self, frame) -> list:
         out = []
-        for r in self._model.predict(frame, verbose=False, conf=0.4):
+        for r in self._model.predict(frame, verbose=False, conf=self._conf_threshold):
             for box in r.boxes:
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0])
                 label = r.names[int(box.cls[0])]

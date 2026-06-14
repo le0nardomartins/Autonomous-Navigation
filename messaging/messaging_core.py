@@ -39,6 +39,7 @@ _config: dict = {
     "CURVA_Ki":                       0,
     "CURVA_Kd":                       0,
     "PARÂMETROS DO CARRO_PWM":       30,
+    "DETECTOR_Confiança mín":        40,
     "running":                    False,
 }
 _config_updated = False
@@ -115,6 +116,25 @@ def api_config_post():
     return jsonify({"ok": True})
 
 
+@app.route("/api/reset", methods=["POST"])
+def api_reset():
+    global _config_updated
+    try:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            saved = json.load(f)
+        with _lock:
+            for k, v in saved.items():
+                if k in _config:
+                    _config[k] = v
+            _config_updated = True
+            snapshot = dict(_config)
+        return jsonify({"ok": True, "config": snapshot})
+    except FileNotFoundError:
+        return jsonify({"ok": False, "error": "config.json não encontrado"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── Painel de controle web ────────────────────────────────────────────────────
 @app.route("/panel")
 def panel_page():
@@ -146,18 +166,20 @@ _PANEL_HTML = """<!DOCTYPE html>
 :root{
   --bg:#1e1e2e;--surface:#181825;--card:#313244;--border:#45475a;
   --fg:#cdd6f4;--muted:#6c7086;--blue:#89b4fa;--green:#a6e3a1;
-  --red:#f38ba8;--purple:#cba6f7;--teal:#94e2d5;
+  --red:#f38ba8;--orange:#fab387;--purple:#cba6f7;--teal:#94e2d5;
   --radius:10px;--font:'Courier New',monospace;
 }
 html{height:100%;overflow-x:hidden}
 body{background:var(--bg);color:var(--fg);font-family:var(--font);min-height:100%;padding-bottom:env(safe-area-inset-bottom)}
+
+/* ── Sticky bar: header + status + actions ── */
+.top-bar{position:sticky;top:0;z-index:20;background:var(--bg)}
 
 /* ── Header ── */
 header{
   background:var(--surface);padding:14px 16px;
   display:flex;align-items:center;gap:10px;
   border-bottom:1px solid var(--border);
-  position:sticky;top:0;z-index:20;
   padding-top:calc(14px + env(safe-area-inset-top));
 }
 header h1{font-size:14px;color:var(--fg);flex:1;letter-spacing:1px;white-space:nowrap}
@@ -174,14 +196,14 @@ header h1{font-size:14px;color:var(--fg);flex:1;letter-spacing:1px;white-space:n
 .status-pill{
   display:flex;align-items:center;gap:6px;
   background:var(--card);border-radius:20px;
-  padding:6px 12px;margin:12px 16px 0;font-size:11px;color:var(--muted);
+  padding:6px 12px;margin:10px 16px 0;font-size:11px;color:var(--muted);
 }
 .dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background .3s,box-shadow .3s}
 .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
 #statusText{flex:1}
 
-/* ── Action buttons ── */
-.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px 16px 0}
+/* ── Action buttons 2x2 ── */
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
 .btn{
   padding:14px 8px;border:none;border-radius:var(--radius);
   font-family:var(--font);font-size:13px;font-weight:bold;
@@ -191,6 +213,7 @@ header h1{font-size:14px;color:var(--fg);flex:1;letter-spacing:1px;white-space:n
 .btn:active{opacity:.75;transform:scale(.97)}
 .btn-start{background:var(--green);color:#1e1e2e}
 .btn-stop {background:var(--red);color:#1e1e2e}
+.btn-reset{background:var(--orange);color:#1e1e2e}
 .btn-save {background:var(--purple);color:#1e1e2e}
 
 /* ── Grid ── */
@@ -239,20 +262,23 @@ input[type=range]::-webkit-slider-runnable-track{border-radius:2px}
 </head>
 <body>
 
-<header>
-  <h1>⚙ Painel de Controle</h1>
-  <button class="back-btn" onclick="window.location.href='/'">← Digital Twin</button>
-</header>
+<div class="top-bar">
+  <header>
+    <h1>⚙ Painel de Controle</h1>
+    <button class="back-btn" onclick="window.location.href='/'">← Digital Twin</button>
+  </header>
 
-<div class="status-pill">
-  <div class="dot" id="runDot"></div>
-  <span id="statusText">Carregando...</span>
-</div>
+  <div class="status-pill">
+    <div class="dot" id="runDot"></div>
+    <span id="statusText">Carregando...</span>
+  </div>
 
-<div class="actions">
-  <button class="btn btn-start" onclick="setRunning(true)">▶ Iniciar</button>
-  <button class="btn btn-stop"  onclick="setRunning(false)">■ Parar</button>
-  <button class="btn btn-save"  onclick="saveConfig()">💾 Salvar</button>
+  <div class="actions">
+    <button class="btn btn-start" onclick="setRunning(true)">▶ Iniciar</button>
+    <button class="btn btn-stop"  onclick="setRunning(false)">■ Parar</button>
+    <button class="btn btn-reset" onclick="resetConfig()">↺ Resetar</button>
+    <button class="btn btn-save"  onclick="saveConfig()">💾 Salvar</button>
+  </div>
 </div>
 
 <div class="grid" id="grid"></div>
@@ -281,6 +307,9 @@ const SECTIONS=[
   ]},
   {title:"PARÂMETROS DO CARRO",controls:[
     {key:"PARÂMETROS DO CARRO_PWM",label:"PWM",min:0,max:255},
+  ]},
+  {title:"DETECTOR",controls:[
+    {key:"DETECTOR_Confiança mín",label:"Confiança mín (%)",min:0,max:100},
   ]},
 ];
 
@@ -341,8 +370,19 @@ function flushUpdate(){
 }
 
 function saveConfig(){
-  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...currentConfig,_save:true})})
-    .then(()=>setStatus('Configuração salva'));
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(currentConfig)})
+    .then(()=>setStatus('Configuração salva '+new Date().toLocaleTimeString()))
+    .catch(()=>setStatus('Sem conexão'));
+}
+
+function resetConfig(){
+  fetch('/api/reset',{method:'POST'})
+    .then(r=>r.json())
+    .then(data=>{
+      if(data.ok){buildUI(data.config);setStatus('Resetado '+new Date().toLocaleTimeString());}
+      else setStatus('Erro: '+(data.error||'reset falhou'));
+    })
+    .catch(()=>setStatus('Sem conexão'));
 }
 
 function setRunning(val){

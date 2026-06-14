@@ -103,6 +103,7 @@ def mainLoop():
         y_bot        = panel.get("ROI", "Altura inf")
         limiar_value = panel.get("IMAGEM", "Limiar")
         pwm          = panel.get("PARÂMETROS DO CARRO", "PWM")
+        sign_det.set_conf(panel.get("DETECTOR", "Confiança mín") / 100.0)
 
         kp_straight = panel.get("RETA", "Kp") / 100.0
         ki_straight = panel.get("RETA", "Ki") / 1000.0
@@ -255,6 +256,34 @@ _B  = "\033[1m"    # negrito
 _RS = "\033[0m"    # reset
 
 
+def _scan_usb_devices() -> list[int]:
+    """Imprime todos os dispositivos USB detectados (câmeras e seriais) e retorna índices de câmera."""
+    from serial.tools import list_ports
+
+    print(f"\n{_C}{_B}[USB]{_RS} Dispositivos detectados:")
+
+    ports = list(list_ports.comports())
+    for p in ports:
+        desc = p.description if (p.description and p.description != p.device) else "dispositivo USB"
+        mfr  = (p.manufacturer or "").lower()
+        is_arduino = "arduino" in desc.lower() or "arduino" in mfr
+        kind = f"{_G}Arduino{_RS}" if is_arduino else f"{_Y}Serial/USB{_RS}"
+        print(f"  {kind}  {_B}{p.device}{_RS}  —  {desc}")
+
+    cam_indices: list[int] = []
+    for idx in range(3):
+        c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        if c.isOpened() and c.read()[0]:
+            cam_indices.append(idx)
+            print(f"  {_G}Camera{_RS}   índice {_B}{idx}{_RS}  —  câmera de vídeo")
+        c.release()
+
+    if not ports and not cam_indices:
+        print(f"  {_Y}Nenhum dispositivo USB encontrado{_RS}")
+    print()
+    return cam_indices
+
+
 def _select_com() -> str:
     from serial.tools import list_ports
     ports = list(list_ports.comports())
@@ -278,15 +307,18 @@ def _select_com() -> str:
     return chosen
 
 
-def _open_camera() -> cv2.VideoCapture:
-    for idx in (1, 0):
-        print(f"{_C}{_B}[CAM]{_RS} Tentando índice {idx}...")
+def _open_camera(cam_indices: list[int]) -> tuple[cv2.VideoCapture, int]:
+    """Abre automaticamente a câmera de maior índice disponível (prefere índice 1)."""
+    priority = [idx for idx in (1, 0) if idx in cam_indices] or (1, 0)
+    for idx in priority:
         c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        c.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         if c.isOpened() and c.read()[0]:
-            print(f"{_G}{_B}[CAM]{_RS} Câmera aberta no índice {_G}{_B}{idx}{_RS}")
-            return c
+            print(f"{_G}{_B}[CAM]{_RS} Câmera aberta automaticamente no índice {_G}{_B}{idx}{_RS}")
+            return c, idx
         c.release()
-    print(f"{_R}{_B}[ERRO]{_RS} Nenhuma câmera disponível (índices 0 e 1 falharam).")
+    print(f"{_R}{_B}[ERRO]{_RS} Nenhuma câmera disponível.")
     exit()
 
 # ── Silencia o Werkzeug antes de subir a thread ────────────────────────────
@@ -314,8 +346,9 @@ threading.Thread(
     daemon=True,
 ).start()
 
+_usb_cams = _scan_usb_devices()
 COM = _select_com()
-cap = _open_camera()
+cap, _cam_idx = _open_camera(_usb_cams)
 print(f"{_C}{_B}[Dashboard]{_RS} http://{_dashboard_ip}:{_DASHBOARD_PORT}/")
 ret, frame = cap.read()
 
@@ -339,7 +372,8 @@ corrector = FisheyeCorrector("calibration/fisheye_calibration.npz", width, heigh
 
 panel = ControlPanel(width, height, test_mode=(COM is None),
                      dashboard_url=f"http://{_dashboard_ip}:{_DASHBOARD_PORT}",
-                     twin_path=_twin_path if os.path.exists(_twin_path) else "")
+                     twin_path=_twin_path if os.path.exists(_twin_path) else "",
+                     initial_cam_idx=_cam_idx)
 t = threading.Thread(target=mainLoop, daemon=True)
 t.start()
 
